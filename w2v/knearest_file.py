@@ -6,13 +6,9 @@
 import argparse
 import json
 import re
-import sys
 import time
 
 import numpy as np
-
-reload(sys)
-sys.setdefaultencoding('utf-8')
 
 
 def load_embedding(emb_path):
@@ -115,19 +111,11 @@ def load_json_dict(token_path):
         for line in embf:
             line = line.strip()
             try:
-                link_dict = json.loads(line)
+                dict = json.loads(line)
             except:
                 continue
-            if 'content' not in link_dict:
-                continue
-            id = link_dict['id']
-            if id not in token_dict:
-                link_contents = []
-                link_dict['contents'] = link_contents
-                token_dict[id] = link_dict
-            elif 'contents' in link_dict:
-                link_contents = link_dict['contents']
-            link_contents.append(link_dict['content'])
+            id = dict['id']
+            token_dict[id] = dict
     return token_dict
 
 
@@ -244,14 +232,13 @@ def encode_text(text):
 def parse_year(title):
     if title is None:
         return None
-    new_title = re.sub(r'(www\.[a-z0-9\.\-]+)|([a-z0-9\.\-]+?\.com)', "", title)
-    match_obj = re.match("(19[0-9]{2}|20[0-9]{2})", new_title)
+    match_obj = re.match("(19[0-9]{2}|20[0-9]{2})", title)
     if match_obj:
-        return match_obj.group(1)
+        return match_obj[1]
     return None
 
 
-def tfidf_knn(link_dict, idf_dict, output_path):
+def tfidf_knn(link_dict, content_dict, idf_dict):
     link_similar_dict = {}
     splitor = b" "
     link_count_dict = {}
@@ -259,64 +246,68 @@ def tfidf_knn(link_dict, idf_dict, output_path):
     for lk, lv in link_dict.items():
         if analyze_key not in lv:
             continue
-        if 'contents' not in lv:
+        analyze_txt = lv[analyze_key]
+        analyze_txt = encode_text(analyze_txt)
+        link_count_dict[lk] = count_dict(analyze_txt.split(splitor))
+    title_count_dict = {}
+    for ck, cv in content_dict.items():
+        if analyze_key not in lv:
             continue
-        analyze_txt = encode_text(get_value(lv, analyze_key))
-        if not analyze_txt:
-            continue
-        link_imdb = get_value(lv, 'imdb')
-        link_year = get_value(lv, 'year') or parse_year(encode_text(lv['title']))
-        link_count = count_dict(analyze_txt.split(splitor))
-        contents = lv['contents']
+        analyze_txt = cv[analyze_key]
+        analyze_txt = encode_text(analyze_txt)
+        title_count_dict[ck] = count_dict(analyze_txt.split(splitor))
+    for lkc, lvc in link_count_dict.items():
         similar_list = []
-        for cc in contents:
+        link_json = link_dict[lkc]
+        link_imdb = get_value(link_json, 'imdb')
+        link_year = get_value(link_json, 'year') or parse_year(encode_text(link_json['analyze']))
+        for ckc, cvc in title_count_dict.items():
+            content_json = content_dict[ckc]
             if link_year is not None and link_year > 0:
                 # 单集影视,年份必须一样
-                epcount = get_value(cc, 'epcount')
+                epcount = get_value(content_json, 'epcount')
                 if epcount is not None and epcount <= 1:
-                    content_year = get_value(cc, 'year')
+                    content_year = get_value(content_json, 'year')
                     if link_year != content_year:
                         continue
-            if link_imdb is not None and link_imdb == get_value(cc, 'imdb'):
+            if link_imdb is not None and link_imdb == get_value(content_json, 'imdb'):
                 cos_val = 0.9999
             else:
-                sAnalyze = encode_text(cc['analyze'])
-                analyze_count = count_dict(sAnalyze.split(splitor))
-                cos_val = tfidf_cosine(link_count, analyze_count, idf_dict)
-            if cos_val < 0.70:
+                cos_val = tfidf_cosine(lvc, cvc, idf_dict)
+            if cos_val < 0.65:
                 continue
-            cc["score"] = cos_val
-            similar_list.append(cc)
+            similar_list.append({"cid": ckc, "score": cos_val})
         similar_list.sort(key=lambda item: item["score"], reverse=True)
         similar_list = similar_list[:min(1, len(similar_list))]
-        lv['contents'] = similar_list
-
+        link_similar_dict[lkc] = similar_list
+        # cur_dict = link_dict[lkc]
+        # print("link:%s,title:%s" % (lkc, json.dumps(cur_dict)))
     bulk_doc = {}
     bulk_doc["_index"] = "match"
     bulk_doc["_type"] = "table"
-    with open(output_path, 'w') as outf:
-        for _, link_json in link_dict.items():
-            if 'contents' not in link_json:
-                continue
-            contents = link_json['contents']
-            for index in range(0, len(contents)):
-                content_json = contents[index]
-                match_vo = {}
-                match_vo['title'] = get_value(link_json, 'title')
-                match_vo['season'] = get_value(link_json, 'season')
-                match_vo['episode'] = get_value(link_json, 'episode')
-                match_vo['docid'] = get_value(content_json, 'id').split('_')[0]
-                # match_vo['doctxt'] = get_value(content_json, 'analyze')
-                match_vo['score'] = float("%.4f" % get_value(content_json, 'score'))
-                match_vo['status'] = 0  # 可用
-                match_vo['ctime'] = int(time.time())
-                bulk_doc["_id"] = get_value(link_json, "id")
-                outf.write(json.dumps({"index": bulk_doc}) + "\n")
-                outf.write(json.dumps(match_vo, ensure_ascii=False) + "\n")
-                # print("%s\t%s\t%s\t%s\t%s\t%s" % (
-                #     str(index), str(lck), str(lcosine["cid"]), str(link_analyze)
-                #     , str("@" + content_analyze),
-                #     str(lcosine["score"])))
+    for lck, lcvs in link_similar_dict.items():
+        link_json = link_dict[lck]
+        link_analyze = encode_text(link_json['analyze'])
+        for index in range(0, len(lcvs)):
+            lcosine = lcvs[index]
+            content_json = content_dict[lcosine["cid"]]
+            content_analyze = encode_text(content_json['analyze'])
+            match_vo = {}
+            # match_vo['_id'] = get_value(link_json, "id")
+            match_vo['title'] = get_value(link_json, 'title')
+            match_vo['season'] = get_value(link_json, 'season')
+            match_vo['episode'] = get_value(link_json, 'episode')
+            match_vo['docid'] = get_value(content_json, 'id').split('_')[0]
+            match_vo['score'] = float("%.4f" % get_value(lcosine, 'score'))
+            match_vo['status'] = 1  # 可用
+            match_vo['ctime'] = int(time.time())
+            bulk_doc["_id"] = get_value(link_json, "id")
+            print("%s" % json.dumps({"index": bulk_doc}))
+            print("%s" % json.dumps(match_vo))
+            # print("%s\t%s\t%s\t%s\t%s\t%s" % (
+            #     str(index), str(lck), str(lcosine["cid"]), str(link_analyze)
+            #     , str("@" + content_analyze),
+            #     str(lcosine["score"])))
 
 
 def parse_args():
@@ -341,10 +332,11 @@ def parse_args():
         required=True,
         help="The path of the links")
     parser.add_argument(
-        '--output_path',
+        '--content_path',
         type=str,
         required=True,
-        help="match output path")
+        help="The path of the movies")
+
     return parser.parse_args()
 
 
@@ -356,10 +348,11 @@ def main():
     args = parse_args()
 
     link_dict = load_json_dict(args.link_path)
+    content_dict = load_json_dict(args.content_path)
     idf_dict = load_pairs(args.idf_dict_path, b"\t")
     for k, v in idf_dict.items():
         idf_dict[k] = float(v)
-    tfidf_knn(link_dict, idf_dict, args.output_path)
+    tfidf_knn(link_dict, content_dict, idf_dict)
     # emb_dict = load_embedding(args.emb_dict_path)
     # w2v_knn(emb_dict, link_dict, content_dict, idf_dict)
 
