@@ -7,8 +7,9 @@ OUT_JSON_LINK="$CUR_DATA_DIR/data/link-title.json"
 OUT_BULK_MATCH="$CUR_DATA_DIR/data/match-link.json"
 OUT_BULK_STATUS="$CUR_DATA_DIR/data/bulk-status.json"
 OUT_UNMATCH_LINK="$CUR_DATA_DIR/data/unmatch-link-title.json"
-CUR_DAY_DIR=`date -d"0 day" "+%Y%m%d%H%M"`
-#CUR_DAY_DIR=`date +%Y%m%d%H%M` --mac
+#CUR_DAY_DIR=`date -d"0 day" "+%Y%m%d%H%M"`
+#mac date
+CUR_DAY_DIR=`date +%Y%m%d%H%M`
 sh $CUR_SCRIPT_DIR/knearest.sh
 curl -XPOST 'localhost:9200/_bulk' --data-binary "@$OUT_BULK_MATCH" > $OUT_BULK_STATUS
 sh $CUR_SCRIPT_DIR/removeall.sh

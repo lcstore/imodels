@@ -33,6 +33,7 @@ def load_json_dict(token_path):
             elif 'contents' in link_dict:
                 link_contents = link_dict['contents']
             link_contents.append(link_dict['content'])
+            del link_dict['content']
     return token_dict
 
 
@@ -92,11 +93,15 @@ def main():
 
     link_dict = load_json_dict(args.link_path)
     bulk_status_dict = load_bulk_status_dict(args.bulk_status_path)
+    print("link_dict:%s,size:%s" % (args.link_path, str(len(link_dict.keys()))))
+    print("bulk_status_dict:%s,size:%s" % (args.bulk_status_path, str(len(bulk_status_dict.keys()))))
     with open(args.remain_path, 'w') as outf:
         for lid, ljson in link_dict.items():
             if lid in bulk_status_dict and bulk_status_dict[lid] >= 200 and bulk_status_dict[lid] < 300:
                 continue
-            outf.write(json.dumps(ljson, ensure_ascii=False))
+            if "contents" in ljson:
+                del ljson["contents"]
+            outf.write(json.dumps(ljson, ensure_ascii=False) + "\n")
 
 
 if __name__ == '__main__':

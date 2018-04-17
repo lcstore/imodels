@@ -252,9 +252,7 @@ def parse_year(title):
 
 
 def tfidf_knn(link_dict, idf_dict, output_path):
-    link_similar_dict = {}
     splitor = b" "
-    link_count_dict = {}
     analyze_key = 'analyze'
     for lk, lv in link_dict.items():
         if analyze_key not in lv:
@@ -273,7 +271,7 @@ def tfidf_knn(link_dict, idf_dict, output_path):
             if link_year is not None and link_year > 0:
                 # 单集影视,年份必须一样
                 epcount = get_value(cc, 'epcount')
-                if epcount is not None and epcount <= 1:
+                if epcount is not None and str(epcount).isdigit() and int(str(epcount)) <= 1:
                     content_year = get_value(cc, 'year')
                     if link_year != content_year:
                         continue
@@ -290,9 +288,9 @@ def tfidf_knn(link_dict, idf_dict, output_path):
         similar_list.sort(key=lambda item: item["score"], reverse=True)
         similar_list = similar_list[:min(1, len(similar_list))]
         lv['contents'] = similar_list
-
+    print("link_dict:" + str(len(link_dict.keys())))
     bulk_doc = {}
-    bulk_doc["_index"] = "match"
+    bulk_doc["_index"] = "link"
     bulk_doc["_type"] = "table"
     with open(output_path, 'w') as outf:
         for _, link_json in link_dict.items():
@@ -305,14 +303,15 @@ def tfidf_knn(link_dict, idf_dict, output_path):
                 match_vo['title'] = get_value(link_json, 'title')
                 match_vo['season'] = get_value(link_json, 'season')
                 match_vo['episode'] = get_value(link_json, 'episode')
-                match_vo['docid'] = get_value(content_json, 'id').split('_')[0]
+                match_vo['target'] = get_value(content_json, 'id').split('_')[0]
                 # match_vo['doctxt'] = get_value(content_json, 'analyze')
                 match_vo['score'] = float("%.4f" % get_value(content_json, 'score'))
-                match_vo['status'] = 0  # 可用
-                match_vo['ctime'] = int(time.time())
+                # -1:失效,0:默认,1:有效,2:自动匹配,3:人工匹配
+                match_vo['status'] = 2
+                match_vo['utime'] = int(time.time())
                 bulk_doc["_id"] = get_value(link_json, "id")
-                outf.write(json.dumps({"index": bulk_doc}) + "\n")
-                outf.write(json.dumps(match_vo, ensure_ascii=False) + "\n")
+                outf.write(json.dumps({"update": bulk_doc}) + "\n")
+                outf.write(json.dumps({"doc": match_vo}, ensure_ascii=False) + "\n")
                 # print("%s\t%s\t%s\t%s\t%s\t%s" % (
                 #     str(index), str(lck), str(lcosine["cid"]), str(link_analyze)
                 #     , str("@" + content_analyze),
